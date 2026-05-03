@@ -1218,8 +1218,8 @@ struct PrayWindowWidget: Widget {
         StaticConfiguration(kind: kind, provider: PrayWindowTimelineProvider()) { entry in
             PrayWindowWidgetEntryView(entry: entry)
         }
-        .configurationDisplayName("Prayer Times")
-        .description("Shows the next prayer with today's Hijri and Gregorian date.")
+        .configurationDisplayName("مواقيت الصلاة")
+        .description("يعرض الصلاة القادمة مع التاريخ الهجري والميلادي لليوم.")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
         .contentMarginsDisabled()
     }
@@ -1236,8 +1236,8 @@ struct PrayWindowCalendarWidget: Widget {
         StaticConfiguration(kind: kind, provider: PrayWindowTimelineProvider()) { entry in
             PrayerCalendarLargeView(entry: entry)
         }
-        .configurationDisplayName("Prayer Calendar")
-        .description("Five-day prayer timetable with Hijri, Gregorian, and solar date details.")
+        .configurationDisplayName("تقويم الصلاة")
+        .description("جدول مواقيت الصلاة لخمسة أيام بالتقويم الهجري والميلادي والشمسي.")
         .supportedFamilies([.systemLarge])
         .contentMarginsDisabled()
     }
@@ -1254,8 +1254,8 @@ struct PrayWindowCountdownWidget: Widget {
         StaticConfiguration(kind: kind, provider: PrayWindowTimelineProvider()) { entry in
             PrayWindowCountdownWidgetEntryView(entry: entry)
         }
-        .configurationDisplayName("Prayer Countdown")
-        .description("Shows the remaining time until the next prayer in a small widget.")
+        .configurationDisplayName("العدّ التنازلي للصلاة")
+        .description("يعرض الوقت المتبقي للصلاة القادمة في ودجت صغير.")
         .supportedFamilies([.systemSmall])
         .contentMarginsDisabled()
     }
@@ -1272,8 +1272,8 @@ struct PrayWindowImagePrayerWidget: Widget {
         StaticConfiguration(kind: kind, provider: PrayWindowTimelineProvider()) { entry in
             PrayWindowImagePrayerWidgetEntryView(entry: entry)
         }
-        .configurationDisplayName("Prayer Times with Background Photo")
-        .description("Shows a Makkah image above the daily prayer times in a medium widget.")
+        .configurationDisplayName("مواقيت الصلاة مع صورة الخلفية")
+        .description("يعرض صورة لمكة المكرمة فوق مواقيت الصلاة اليومية في ودجت متوسط.")
         .supportedFamilies([.systemMedium])
         .contentMarginsDisabled()
     }
@@ -1290,8 +1290,8 @@ struct PrayWindowDateWisdomWidget: Widget {
         StaticConfiguration(kind: kind, provider: PrayWindowTimelineProvider()) { entry in
             PrayWindowDateWisdomWidgetEntryView(entry: entry)
         }
-        .configurationDisplayName("Date and Wisdom")
-        .description("Shows a photo on the right with Gregorian date, Hijri date, and the wisdom of the day on the left.")
+        .configurationDisplayName("التاريخ وحكمة اليوم")
+        .description("يعرض صورة على اليمين مع التاريخ الميلادي والهجري وحكمة اليوم على اليسار.")
         .supportedFamilies([.systemMedium])
         .contentMarginsDisabled()
     }
@@ -1308,8 +1308,8 @@ struct PrayWindowLockScreenCountdownWidget: Widget {
         StaticConfiguration(kind: kind, provider: PrayWindowTimelineProvider()) { entry in
             PrayWindowLockScreenCountdownWidgetEntryView(entry: entry)
         }
-        .configurationDisplayName("Prayer Countdown Lock Screen")
-        .description("Shows the remaining time until the next prayer on the Lock Screen.")
+        .configurationDisplayName("عدّاد الصلاة لقفل الشاشة")
+        .description("يعرض الوقت المتبقي للصلاة القادمة على شاشة القفل.")
         .supportedFamilies([.accessoryCircular])
     }
 }
@@ -1325,8 +1325,8 @@ struct PrayWindowLockScreenPrayerWidget: Widget {
         StaticConfiguration(kind: kind, provider: PrayWindowTimelineProvider()) { entry in
             PrayWindowLockScreenPrayerWidgetEntryView(entry: entry)
         }
-        .configurationDisplayName("Next Prayer Lock Screen")
-        .description("Shows the next prayer name and time on the Lock Screen.")
+        .configurationDisplayName("الصلاة القادمة لقفل الشاشة")
+        .description("يعرض اسم ووقت الصلاة القادمة على شاشة القفل.")
         .supportedFamilies([.accessoryRectangular])
     }
 }
