@@ -63,6 +63,7 @@ extension LocationManager: CLLocationManagerDelegate {
         guard let location = locations.first else { return }
 
         Task { @MainActor in
+            defer { onLocationResolved = nil }
             do {
                 let city = try await reverseGeocodeCity(for: location)
                     ?? "Current Location"

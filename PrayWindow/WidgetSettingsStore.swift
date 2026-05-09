@@ -14,7 +14,7 @@ import WidgetKit
 #endif
 
 enum SharedStore {
-    static let appGroupID = "group.com.alialmatrafi.PrayWindow"
+    static let appGroupID = "group.com.nahedh.apps.PrayWindow"
     static let settingsKey = "prayer_settings"
     static let customPhotoFilePrefix = "widget_custom_photo_"
     static let customPhotoDataKey = "widget_custom_photo_data"
@@ -132,6 +132,9 @@ final class WidgetSettingsStore {
         }
         if copy.theme.textHex.uppercased() == "#00000000" {
             copy.theme.textHex = WidgetTheme.default.textHex
+        }
+        if copy.prePrayerAlertBarColorHex.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            copy.prePrayerAlertBarColorHex = PrayerSettings.default.prePrayerAlertBarColorHex
         }
         copy.theme.fontSizeMultiplier = min(max(copy.theme.fontSizeMultiplier, 0.7), 1.6)
         copy.customPhotoFocusX = min(max(copy.customPhotoFocusX, 0), 1)
