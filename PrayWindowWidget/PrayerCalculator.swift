@@ -17,15 +17,14 @@ struct PrayerDaySchedule {
 }
 
 enum PrayerCalculator {
-    private static let fajrAngle = 18.5
     private static let sunriseSunsetAngle = 0.833
-    private static let dhuhrOffsetMinutes = 1.0
-    private static let asrShadowFactor = 1.0
+    private static let alertWindowSeconds: TimeInterval = 600
 
     static func schedule(
         for date: Date,
         latitude: Double,
         longitude: Double,
+        method: PrayerCalculationMethod = .ummAlQura,
         timeZone: TimeZone = .current
     ) -> PrayerDaySchedule {
         var calendar = Calendar(identifier: .gregorian)
@@ -36,12 +35,13 @@ enum PrayerCalculator {
         let sunrise = solarEventTime(zenith: 90 + sunriseSunsetAngle, components: components, morning: true)
         let sunset = solarEventTime(zenith: 90 + sunriseSunsetAngle, components: components, morning: false)
         let solarNoon = (720 - 4 * longitude - components.equationOfTime + Double(timeZone.secondsFromGMT(for: startOfDay)) / 60) / 60
+        let parameters = parameters(for: method, date: startOfDay)
 
-        let fajr = solarEventTime(zenith: 90 + fajrAngle, components: components, morning: true)
-        let dhuhr = solarNoon + (dhuhrOffsetMinutes / 60)
-        let asr = asrTime(components: components, factor: asrShadowFactor)
+        let fajr = solarEventTime(zenith: 90 + parameters.fajrAngle, components: components, morning: true)
+        let dhuhr = solarNoon + (parameters.dhuhrOffsetMinutes / 60)
+        let asr = asrTime(components: components, factor: parameters.asrShadowFactor)
         let maghrib = sunset
-        let isha = maghrib + ishaIntervalHours(for: startOfDay)
+        let isha = parameters.ishaTimeHours(from: maghrib, components: components)
 
         let moments = [
             PrayerMoment(prayer: .fajr, date: combine(day: startOfDay, hours: fajr)),
@@ -59,16 +59,28 @@ enum PrayerCalculator {
         from date: Date,
         latitude: Double,
         longitude: Double,
+        method: PrayerCalculationMethod = .ummAlQura,
         timeZone: TimeZone = .current
     ) -> PrayerMoment {
-        let today = schedule(for: date, latitude: latitude, longitude: longitude, timeZone: timeZone)
+        let today = schedule(for: date, latitude: latitude, longitude: longitude, method: method, timeZone: timeZone)
         if let next = today.nextPrayer {
             return next
         }
 
         let tomorrow = Calendar(identifier: .gregorian).date(byAdding: .day, value: 1, to: date) ?? date
-        let tomorrowSchedule = schedule(for: tomorrow, latitude: latitude, longitude: longitude, timeZone: timeZone)
+        let tomorrowSchedule = schedule(for: tomorrow, latitude: latitude, longitude: longitude, method: method, timeZone: timeZone)
         return tomorrowSchedule.moments.first(where: { $0.prayer != .sunrise }) ?? PrayerMoment(prayer: .fajr, date: tomorrow)
+    }
+
+    static func alertProgress(
+        at date: Date,
+        for nextPrayer: PrayerMoment,
+        isEnabled: Bool
+    ) -> Double? {
+        guard isEnabled else { return nil }
+        let remaining = nextPrayer.date.timeIntervalSince(date)
+        guard remaining > 0, remaining <= alertWindowSeconds else { return nil }
+        return min(max(remaining / alertWindowSeconds, 0), 1)
     }
 
     private static func solarComponents(for date: Date, latitude: Double, longitude: Double, timeZone: TimeZone) -> SolarComponents {
@@ -102,7 +114,7 @@ enum PrayerCalculator {
         )
     }
 
-    private static func solarEventTime(zenith: Double, components: SolarComponents, morning: Bool) -> Double {
+    fileprivate static func solarEventTime(zenith: Double, components: SolarComponents, morning: Bool) -> Double {
         let zenithRadians = zenith * Double.pi / 180
         let cosineHourAngle = (
             cos(zenithRadians) - sin(components.latitudeRadians) * sin(components.declination)
@@ -125,15 +137,52 @@ enum PrayerCalculator {
         return minutes / 60
     }
 
-    private static func ishaIntervalHours(for date: Date) -> Double {
-        let hijriMonth = Calendar(identifier: .islamicUmmAlQura).component(.month, from: date)
-        return hijriMonth == 9 ? 2 : 1.5
+    private static func parameters(for method: PrayerCalculationMethod, date: Date) -> CalculationParameters {
+        switch method {
+        case .ummAlQura:
+            let hijriMonth = Calendar(identifier: .islamicUmmAlQura).component(.month, from: date)
+            return CalculationParameters(
+                fajrAngle: 18.5,
+                ishaRule: .fixedHours(hijriMonth == 9 ? 2 : 1.5),
+                dhuhrOffsetMinutes: 1,
+                asrShadowFactor: 1
+            )
+        case .muslimWorldLeague:
+            return CalculationParameters(fajrAngle: 18, ishaRule: .angle(17), dhuhrOffsetMinutes: 1, asrShadowFactor: 1)
+        case .egyptian:
+            return CalculationParameters(fajrAngle: 19.5, ishaRule: .angle(17.5), dhuhrOffsetMinutes: 1, asrShadowFactor: 1)
+        case .karachi:
+            return CalculationParameters(fajrAngle: 18, ishaRule: .angle(18), dhuhrOffsetMinutes: 1, asrShadowFactor: 1)
+        case .northAmerica:
+            return CalculationParameters(fajrAngle: 15, ishaRule: .angle(15), dhuhrOffsetMinutes: 1, asrShadowFactor: 1)
+        }
     }
 
     private static func combine(day: Date, hours: Double) -> Date {
         let seconds = Int((hours * 3600).rounded())
         return day.addingTimeInterval(TimeInterval(seconds))
     }
+}
+
+private struct CalculationParameters {
+    let fajrAngle: Double
+    let ishaRule: IshaRule
+    let dhuhrOffsetMinutes: Double
+    let asrShadowFactor: Double
+
+    func ishaTimeHours(from maghrib: Double, components: SolarComponents) -> Double {
+        switch ishaRule {
+        case let .fixedHours(hours):
+            return maghrib + hours
+        case let .angle(angle):
+            return PrayerCalculator.solarEventTime(zenith: 90 + angle, components: components, morning: false)
+        }
+    }
+}
+
+private enum IshaRule {
+    case fixedHours(Double)
+    case angle(Double)
 }
 
 private struct SolarComponents {

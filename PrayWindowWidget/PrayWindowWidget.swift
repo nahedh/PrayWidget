@@ -26,17 +26,23 @@ struct PrayWindowTimelineProvider: TimelineProvider {
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<PrayWindowEntry>) -> Void) {
         let now = Date()
-        let entry = entry(at: now)
-        let refreshDate = Calendar.current.date(byAdding: .minute, value: 15, to: now) ?? now.addingTimeInterval(900)
-        completion(Timeline(entries: [entry], policy: .after(refreshDate)))
+        let settings = WidgetSettingsStore.shared.load()
+        let entries = timelineEntries(startingAt: now, settings: settings)
+        let refreshDate = entries.last?.date.addingTimeInterval(60) ?? now.addingTimeInterval(3600)
+        completion(Timeline(entries: entries, policy: .after(refreshDate)))
     }
 
     private func entry(at date: Date) -> PrayWindowEntry {
         let settings = WidgetSettingsStore.shared.load()
+        return entry(at: date, settings: settings)
+    }
+
+    private func entry(at date: Date, settings: PrayerSettings) -> PrayWindowEntry {
         let nextPrayer = PrayerCalculator.nextPrayer(
             from: date,
             latitude: settings.latitude,
-            longitude: settings.longitude
+            longitude: settings.longitude,
+            method: settings.calculationMethod
         )
         return PrayWindowEntry(date: date, settings: settings, nextPrayer: nextPrayer)
     }
@@ -46,9 +52,39 @@ struct PrayWindowTimelineProvider: TimelineProvider {
         let nextPrayer = PrayerCalculator.nextPrayer(
             from: date,
             latitude: settings.latitude,
-            longitude: settings.longitude
+            longitude: settings.longitude,
+            method: settings.calculationMethod
         )
         return PrayWindowEntry(date: date, settings: settings, nextPrayer: nextPrayer)
+    }
+
+    private func timelineEntries(startingAt now: Date, settings: PrayerSettings) -> [PrayWindowEntry] {
+        var timestamps = Set<Date>([now])
+        let calendar = Calendar(identifier: .gregorian)
+
+        for dayOffset in 0...1 {
+            guard let targetDate = calendar.date(byAdding: .day, value: dayOffset, to: now) else { continue }
+            let schedule = PrayerCalculator.schedule(
+                for: targetDate,
+                latitude: settings.latitude,
+                longitude: settings.longitude,
+                method: settings.calculationMethod
+            )
+
+            for moment in schedule.moments where moment.prayer != .sunrise && moment.date > now {
+                timestamps.insert(moment.date)
+
+                let warningStart = max(now, moment.date.addingTimeInterval(-600))
+                var tick = warningStart
+                while tick < moment.date {
+                    timestamps.insert(tick)
+                    tick = tick.addingTimeInterval(60)
+                }
+            }
+        }
+
+        let sortedDates = timestamps.sorted().filter { $0 >= now }
+        return sortedDates.map { entry(at: $0, settings: settings) }
     }
 }
 
@@ -61,7 +97,8 @@ struct PrayWindowWidgetEntryView: View {
         let schedule = PrayerCalculator.schedule(
             for: entry.date,
             latitude: entry.settings.latitude,
-            longitude: entry.settings.longitude
+            longitude: entry.settings.longitude,
+            method: entry.settings.calculationMethod
         )
 
         PrayerWidgetChrome(entry: entry, family: family, moments: schedule.moments)
@@ -85,7 +122,8 @@ struct PrayWindowImagePrayerWidgetEntryView: View {
         let schedule = PrayerCalculator.schedule(
             for: entry.date,
             latitude: entry.settings.latitude,
-            longitude: entry.settings.longitude
+            longitude: entry.settings.longitude,
+            method: entry.settings.calculationMethod
         )
 
         PrayerImageMediumView(entry: entry, moments: schedule.moments)
@@ -137,20 +175,84 @@ private struct WidgetMetrics {
     }
 }
 
+private struct PrayerAlertBarState {
+    let progress: Double
+    let color: Color
+    let fillAlignment: Alignment
+}
+
+private struct PrayerAlertBarOverlay: View {
+    let state: PrayerAlertBarState
+
+    var body: some View {
+        GeometryReader { proxy in
+            let width = max(proxy.size.width * state.progress, 0)
+
+            RoundedRectangle(cornerRadius: 999, style: .continuous)
+                .fill(Color.white.opacity(0.18))
+                .overlay(alignment: state.fillAlignment) {
+                    RoundedRectangle(cornerRadius: 999, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [state.color.opacity(0.95), state.color.opacity(0.55)],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(width: width)
+                }
+        }
+        .frame(height: 6)
+    }
+}
+
+private extension View {
+    func withPrayerAlertBar(for entry: PrayWindowEntry) -> some View {
+        let progress = PrayerCalculator.alertProgress(
+            at: entry.date,
+            for: entry.nextPrayer,
+            isEnabled: entry.settings.showsPrePrayerAlertBar
+        )
+
+        let state = progress.map {
+            PrayerAlertBarState(
+                progress: $0,
+                color: Color(hex: entry.settings.prePrayerAlertBarColorHex),
+                fillAlignment: entry.settings.language.isArabic ? .trailing : .leading
+            )
+        }
+
+        return overlay(alignment: .top) {
+            if let state {
+                PrayerAlertBarOverlay(state: state)
+            }
+        }
+    }
+}
+
 private struct PrayerLockScreenCountdownCircularView: View {
     let entry: PrayWindowEntry
 
     private var language: AppLanguage { entry.settings.language }
     private var locale: Locale { language.locale }
+    private var cityName: String {
+        let trimmed = entry.settings.city.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Current Location" : trimmed
+    }
 
     var body: some View {
-        VStack(spacing: 2) {
+        VStack(spacing: 1) {
+            Text(shortCityName)
+                .font(.system(size: 7.2, weight: .semibold, design: .rounded))
+                .widgetTextFit(lines: 1, minScale: 0.5)
+                .opacity(0.78)
+
             Text(shortPrayerName)
                 .font(.system(size: 10, weight: .bold, design: .rounded))
                 .widgetTextFit(lines: 1, minScale: 0.6)
 
             Text(entry.nextPrayer.date, style: .timer)
-                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .font(.system(size: 12.5, weight: .bold, design: .rounded))
                 .monospacedDigit()
                 .widgetTextFit(lines: 1, minScale: 0.4)
 
@@ -176,27 +278,42 @@ private struct PrayerLockScreenCountdownCircularView: View {
         let title = entry.nextPrayer.prayer.title(for: language)
         return title.count > 10 ? String(title.prefix(10)) : title
     }
+
+    private var shortCityName: String {
+        let maxLength = language.isArabic ? 8 : 10
+        return cityName.count > maxLength ? String(cityName.prefix(maxLength)) : cityName
+    }
 }
 
 private struct PrayerLockScreenPrayerRectangularView: View {
     let entry: PrayWindowEntry
 
     private var language: AppLanguage { entry.settings.language }
+    private var cityName: String {
+        let trimmed = entry.settings.city.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Current Location" : trimmed
+    }
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(entry.nextPrayer.prayer.title(for: language))
-                .font(.system(size: 16, weight: .bold, design: .rounded))
-                .foregroundStyle(.primary)
-                .widgetTextFit(lines: 1, minScale: 0.65)
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Text(entry.nextPrayer.prayer.title(for: language))
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
+                    .widgetTextFit(lines: 1, minScale: 0.65)
+
+                Text(cityName)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.primary.opacity(0.82))
+                    .widgetTextFit(lines: 1, minScale: 0.62)
+            }
 
             Text(entry.nextPrayer.date, style: .timer)
-                .font(.system(size: 24, weight: .heavy, design: .rounded))
+                .font(.system(size: 38, weight: .black, design: .rounded))
                 .monospacedDigit()
                 .foregroundStyle(.primary)
-                .widgetTextFit(lines: 1, minScale: 0.5)
-
-            Spacer(minLength: 0)
+                .widgetTextFit(lines: 1, minScale: 0.68)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .containerBackground(for: .widget) {
@@ -428,6 +545,10 @@ struct PrayerWidgetChrome: View {
     private var foreground: Color { Color(hex: entry.settings.theme.textHex) }
     private var panelBackground: Color { background.opacity(0.42) }
     private var panelBorder: Color { foreground.opacity(0.16) }
+    private var cityName: String {
+        let trimmed = entry.settings.city.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Current Location" : trimmed
+    }
     private var prayerMoments: [PrayerMoment] {
         moments.filter { $0.prayer != .sunrise }
     }
@@ -451,6 +572,7 @@ struct PrayerWidgetChrome: View {
             .foregroundStyle(foreground)
         }
         .containerBackground(for: .widget) { background }
+        .withPrayerAlertBar(for: entry)
     }
 
     @ViewBuilder
@@ -499,9 +621,10 @@ struct PrayerWidgetChrome: View {
     }
 
     private func smallLayout(metrics: WidgetMetrics) -> some View {
-        VStack(alignment: .leading, spacing: metrics.inset(6)) {
+        VStack(alignment: .leading, spacing: metrics.inset(4)) {
             headerStrip(metrics: metrics)
-            VStack(alignment: .leading, spacing: metrics.inset(3)) {
+            cityLine(metrics: metrics)
+            VStack(alignment: .leading, spacing: metrics.inset(2)) {
                 Text(language.text(.nextPrayer))
                     .font(entry.settings.theme.fontStyle.font(size: metrics.font(11), weight: .semibold))
                     .opacity(0.74)
@@ -518,7 +641,7 @@ struct PrayerWidgetChrome: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         }
-        .padding(metrics.inset(10))
+        .padding(metrics.inset(8))
         .background(panelBackground)
         .overlay(RoundedRectangle(cornerRadius: metrics.inset(18), style: .continuous).stroke(panelBorder, lineWidth: 1))
         .clipShape(RoundedRectangle(cornerRadius: metrics.inset(18), style: .continuous))
@@ -526,9 +649,10 @@ struct PrayerWidgetChrome: View {
     }
 
     private func mediumLayout(metrics: WidgetMetrics) -> some View {
-        HStack(spacing: metrics.inset(12)) {
-            VStack(alignment: .leading, spacing: metrics.inset(8)) {
+        HStack(spacing: metrics.inset(10)) {
+            VStack(alignment: .leading, spacing: metrics.inset(5)) {
                 headerStrip(metrics: metrics)
+                cityLine(metrics: metrics)
 
                 Spacer(minLength: 0)
 
@@ -544,12 +668,12 @@ struct PrayerWidgetChrome: View {
                     .widgetTextFit(minScale: 0.62)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(metrics.inset(14))
+            .padding(metrics.inset(12))
             .background(panelBackground)
             .overlay(RoundedRectangle(cornerRadius: metrics.inset(18), style: .continuous).stroke(panelBorder, lineWidth: 1))
             .clipShape(RoundedRectangle(cornerRadius: metrics.inset(18), style: .continuous))
 
-            VStack(alignment: .leading, spacing: metrics.inset(7)) {
+            VStack(alignment: .leading, spacing: metrics.inset(5)) {
                 Text(language.text(.prayerTimes))
                     .font(entry.settings.theme.fontStyle.font(size: metrics.font(10), weight: .semibold))
                     .opacity(0.74)
@@ -559,7 +683,7 @@ struct PrayerWidgetChrome: View {
                 }
             }
             .frame(width: proxySideWidth(for: metrics), alignment: .leading)
-            .padding(metrics.inset(10))
+            .padding(metrics.inset(8))
             .background(panelBackground)
             .overlay(RoundedRectangle(cornerRadius: metrics.inset(18), style: .continuous).stroke(panelBorder, lineWidth: 1))
             .clipShape(RoundedRectangle(cornerRadius: metrics.inset(18), style: .continuous))
@@ -567,15 +691,16 @@ struct PrayerWidgetChrome: View {
     }
 
     private func largeLayout(metrics: WidgetMetrics) -> some View {
-        VStack(alignment: .leading, spacing: metrics.inset(12)) {
+        VStack(alignment: .leading, spacing: metrics.inset(8)) {
             HStack(spacing: metrics.inset(8)) {
                 infoPanel(day: gregorianDay, title: gregorianMonth, subtitle: language.text(.gregorian), metrics: metrics)
                 infoPanel(day: weekdayTitle, title: PrayerDateFormatter.gregorianDayMonth(for: entry.date, locale: locale), subtitle: language.text(.today), metrics: metrics, centered: true)
                 infoPanel(day: hijriDay, title: hijriMonth, subtitle: language.text(.hijri), metrics: metrics)
             }
 
-            HStack(alignment: .top, spacing: metrics.inset(10)) {
-                VStack(alignment: .leading, spacing: metrics.inset(9)) {
+            HStack(alignment: .top, spacing: metrics.inset(8)) {
+                VStack(alignment: .leading, spacing: metrics.inset(5)) {
+                    cityLine(metrics: metrics)
                     Text(language.text(.nextPrayer))
                         .font(entry.settings.theme.fontStyle.font(size: metrics.font(11), weight: .semibold))
                         .opacity(0.74)
@@ -594,13 +719,13 @@ struct PrayerWidgetChrome: View {
                         .padding(.horizontal, metrics.inset(10))
                         .padding(.vertical, metrics.inset(8))
                 }
-                .frame(maxWidth: .infinity, minHeight: metrics.inset(184), alignment: .leading)
-                .padding(metrics.inset(18))
+                .frame(maxWidth: .infinity, minHeight: metrics.inset(176), alignment: .leading)
+                .padding(metrics.inset(14))
                 .background(panelBackground)
                 .overlay(RoundedRectangle(cornerRadius: metrics.inset(20), style: .continuous).stroke(panelBorder, lineWidth: 1))
                 .clipShape(RoundedRectangle(cornerRadius: metrics.inset(20), style: .continuous))
 
-                VStack(alignment: .leading, spacing: metrics.inset(7)) {
+                VStack(alignment: .leading, spacing: metrics.inset(5)) {
                     HStack {
                         Text(language.text(.prayerTimes))
                             .font(entry.settings.theme.fontStyle.font(size: metrics.font(11), weight: .semibold))
@@ -615,7 +740,7 @@ struct PrayerWidgetChrome: View {
                     }
                 }
                 .frame(width: metrics.inset(150), alignment: .leading)
-                .padding(metrics.inset(12))
+                .padding(metrics.inset(10))
                 .background(panelBackground)
                 .overlay(RoundedRectangle(cornerRadius: metrics.inset(20), style: .continuous).stroke(panelBorder, lineWidth: 1))
                 .clipShape(RoundedRectangle(cornerRadius: metrics.inset(20), style: .continuous))
@@ -625,7 +750,7 @@ struct PrayerWidgetChrome: View {
 
     private func headerStrip(metrics: WidgetMetrics) -> some View {
         HStack(alignment: .top, spacing: metrics.inset(8)) {
-            VStack(alignment: .leading, spacing: metrics.inset(2)) {
+            VStack(alignment: .leading, spacing: metrics.inset(1)) {
                 Text(weekdayTitle)
                     .font(entry.settings.theme.fontStyle.font(size: metrics.font(11), weight: .semibold))
                     .opacity(0.82)
@@ -643,8 +768,15 @@ struct PrayerWidgetChrome: View {
         }
     }
 
+    private func cityLine(metrics: WidgetMetrics) -> some View {
+        Label(cityName, systemImage: "location.fill")
+            .font(entry.settings.theme.fontStyle.font(size: metrics.font(9.6), weight: .semibold))
+            .widgetTextFit(lines: 1, minScale: 0.72)
+            .opacity(0.84)
+    }
+
     private func infoPanel(day: String, title: String, subtitle: String, metrics: WidgetMetrics, centered: Bool = false) -> some View {
-        VStack(alignment: centered ? .center : .leading, spacing: metrics.inset(4)) {
+        VStack(alignment: centered ? .center : .leading, spacing: metrics.inset(2.5)) {
             Text(day)
                 .font(entry.settings.theme.fontStyle.font(size: metrics.font(11), weight: .semibold))
                 .widgetTextFit(minScale: 0.62)
@@ -672,7 +804,7 @@ struct PrayerWidgetChrome: View {
                 .monospacedDigit()
                 .widgetTextFit(minScale: 0.86)
         }
-        .padding(.vertical, metrics.inset(compact ? 2 : 3))
+        .padding(.vertical, metrics.inset(compact ? 1 : 2))
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(foreground.opacity(0.18))
@@ -706,6 +838,10 @@ private struct PrayerCountdownSmallView: View {
     private var locale: Locale { language.locale }
     private var background: Color { Color(hex: entry.settings.theme.backgroundHex) }
     private var foreground: Color { Color(hex: entry.settings.theme.textHex) }
+    private var cityName: String {
+        let trimmed = entry.settings.city.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Current Location" : trimmed
+    }
     var body: some View {
         GeometryReader { proxy in
             let metrics = WidgetMetrics(
@@ -713,7 +849,12 @@ private struct PrayerCountdownSmallView: View {
                 multiplier: entry.settings.theme.textScale.multiplier * CGFloat(entry.settings.theme.fontSizeMultiplier)
             )
 
-            VStack(alignment: .leading, spacing: metrics.inset(8)) {
+            VStack(alignment: .leading, spacing: metrics.inset(5)) {
+                Label(cityName, systemImage: "location.fill")
+                    .font(entry.settings.theme.fontStyle.font(size: metrics.font(10.5), weight: .semibold))
+                    .widgetTextFit(minScale: 0.72)
+                    .opacity(0.84)
+
                 Text(language.text(.remainingTime))
                     .font(entry.settings.theme.fontStyle.font(size: metrics.font(11), weight: .semibold))
                     .opacity(0.78)
@@ -740,7 +881,7 @@ private struct PrayerCountdownSmallView: View {
                 Spacer(minLength: 0)
             }
             .foregroundStyle(foreground)
-            .padding(metrics.inset(14))
+            .padding(metrics.inset(12))
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(
                 WidgetPhotoBackground(
@@ -751,6 +892,7 @@ private struct PrayerCountdownSmallView: View {
             )
         }
         .containerBackground(for: .widget) { background }
+        .withPrayerAlertBar(for: entry)
     }
 }
 
@@ -763,6 +905,10 @@ private struct PrayerImageMediumView: View {
     private var background: Color { Color(hex: entry.settings.theme.backgroundHex) }
     private var foreground: Color { Color(hex: entry.settings.theme.textHex) }
     private var lowerSectionBackground: Color { background.opacity(0.78) }
+    private var cityName: String {
+        let trimmed = entry.settings.city.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Current Location" : trimmed
+    }
     private var prayerMoments: [PrayerMoment] {
         moments.filter { $0.prayer != .sunrise }
     }
@@ -783,7 +929,12 @@ private struct PrayerImageMediumView: View {
                         .frame(width: proxy.size.width, height: proxy.size.height * 0.5)
                 }
 
-                VStack(alignment: .leading, spacing: metrics.inset(6)) {
+                VStack(alignment: .leading, spacing: metrics.inset(4)) {
+                    Label(cityName, systemImage: "location.fill")
+                        .font(entry.settings.theme.fontStyle.font(size: metrics.font(10.4), weight: .semibold))
+                        .widgetTextFit(minScale: 0.72)
+                        .opacity(0.84)
+
                     Spacer(minLength: 0)
 
                     HStack(alignment: .top, spacing: metrics.inset(4)) {
@@ -801,10 +952,11 @@ private struct PrayerImageMediumView: View {
             .background(background)
         }
         .containerBackground(for: .widget) { background }
+        .withPrayerAlertBar(for: entry)
     }
 
     private func prayerMomentCell(moment: PrayerMoment, metrics: WidgetMetrics) -> some View {
-        VStack(spacing: metrics.inset(3.5)) {
+        VStack(spacing: metrics.inset(2.5)) {
             Text(moment.prayer.title(for: language))
                 .font(entry.settings.theme.fontStyle.font(size: metrics.font(11), weight: .semibold))
                 .widgetTextFit(lines: 2, minScale: 0.72)
@@ -829,6 +981,10 @@ private struct PrayerDateWisdomMediumView: View {
     private var foreground: Color { Color(hex: entry.settings.theme.textHex) }
     private var panelBackground: Color { background.opacity(0.76) }
     private var panelBorder: Color { foreground.opacity(0.14) }
+    private var cityName: String {
+        let trimmed = entry.settings.city.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Current Location" : trimmed
+    }
 
     var body: some View {
         GeometryReader { proxy in
@@ -848,17 +1004,23 @@ private struct PrayerDateWisdomMediumView: View {
             .background(background)
         }
         .containerBackground(for: .widget) { background }
+        .withPrayerAlertBar(for: entry)
     }
 
     private func infoPanel(metrics: WidgetMetrics) -> some View {
-        VStack(alignment: .center, spacing: metrics.inset(18)) {
+        VStack(alignment: .center, spacing: metrics.inset(12)) {
             Text(weekdayTitle)
                 .font(entry.settings.theme.fontStyle.font(size: metrics.font(24), weight: .bold))
                 .widgetTextFit(lines: 1, minScale: 0.6)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity, alignment: .center)
 
-            HStack(alignment: .top, spacing: metrics.inset(12)) {
+            Label(cityName, systemImage: "location.fill")
+                .font(entry.settings.theme.fontStyle.font(size: metrics.font(10.8), weight: .semibold))
+                .widgetTextFit(lines: 1, minScale: 0.72)
+                .opacity(0.84)
+
+            HStack(alignment: .top, spacing: metrics.inset(8)) {
                 dateColumn(
                     day: gregorianDay,
                     month: gregorianMonth,
@@ -895,7 +1057,7 @@ private struct PrayerDateWisdomMediumView: View {
     }
 
     private func dateColumn(day: String, month: String, year: String, metrics: WidgetMetrics, emphasized: Bool) -> some View {
-        VStack(spacing: metrics.inset(3)) {
+        VStack(spacing: metrics.inset(2)) {
             Text(day)
                 .font(entry.settings.theme.fontStyle.font(size: metrics.font(emphasized ? 21 : 19), weight: .bold))
                 .widgetTextFit(lines: 1, minScale: 0.7)
@@ -990,6 +1152,10 @@ private struct PrayerCalendarLargeView: View {
     private var foreground: Color { Color(hex: entry.settings.theme.textHex) }
     private var rowFillA: Color { .clear }
     private var rowFillB: Color { .clear }
+    private var cityName: String {
+        let trimmed = entry.settings.city.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Current Location" : trimmed
+    }
 
     var body: some View {
         GeometryReader { proxy in
@@ -1007,7 +1173,13 @@ private struct PrayerCalendarLargeView: View {
                     tintOpacity: 0.78
                 )
 
-                VStack(spacing: metrics.inset(10)) {
+                VStack(spacing: metrics.inset(7)) {
+                    Label(cityName, systemImage: "location.fill")
+                        .font(WidgetFontStyle.cairo.font(size: metrics.font(10.8), weight: .bold))
+                        .foregroundStyle(foreground)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+
                     HStack(spacing: 0) {
                         calendarHeadBlock(day: gregorianDay, top: gregorianMonth(locale: locale), middle: gregorianYear, bottom: language.text(.gregorian), metrics: metrics)
                         centerSeal(metrics: metrics)
@@ -1016,7 +1188,7 @@ private struct PrayerCalendarLargeView: View {
                     .frame(height: metrics.inset(74))
                     .clipped()
 
-                    VStack(spacing: metrics.inset(6)) {
+                    VStack(spacing: metrics.inset(4)) {
                         HStack(spacing: 0) {
                             columnHeader(language.text(.day), width: proxy.size.width * 0.22, metrics: metrics)
                             columnHeader(Prayer.fajr.title(for: language), width: proxy.size.width * 0.156, metrics: metrics)
@@ -1043,11 +1215,12 @@ private struct PrayerCalendarLargeView: View {
                         .padding(.top, metrics.inset(2))
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(4)
+                .padding(3)
             }
         }
         .environment(\.layoutDirection, entry.settings.language.layoutDirection)
         .containerBackground(for: .widget) { background }
+        .withPrayerAlertBar(for: entry)
     }
 
     private func calendarHeadBlock(day: String, top: String, middle: String, bottom: String, metrics: WidgetMetrics) -> some View {
@@ -1127,7 +1300,8 @@ private struct PrayerCalendarLargeView: View {
                 schedule: PrayerCalculator.schedule(
                     for: targetDate,
                     latitude: entry.settings.latitude,
-                    longitude: entry.settings.longitude
+                    longitude: entry.settings.longitude,
+                    method: entry.settings.calculationMethod
                 )
             )
         }

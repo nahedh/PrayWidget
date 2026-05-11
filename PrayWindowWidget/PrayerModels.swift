@@ -259,6 +259,31 @@ enum WidgetPhotoChoice: String, CaseIterable, Codable, Identifiable {
     }
 }
 
+enum PrayerCalculationMethod: String, CaseIterable, Codable, Identifiable {
+    case ummAlQura
+    case muslimWorldLeague
+    case egyptian
+    case karachi
+    case northAmerica
+
+    var id: String { rawValue }
+
+    func title(for language: AppLanguage) -> String {
+        switch (self, language) {
+        case (.ummAlQura, .english): return "Umm Al-Qura"
+        case (.ummAlQura, .arabic): return "أم القرى"
+        case (.muslimWorldLeague, .english): return "Muslim World League"
+        case (.muslimWorldLeague, .arabic): return "رابطة العالم الإسلامي"
+        case (.egyptian, .english): return "Egyptian"
+        case (.egyptian, .arabic): return "الهيئة المصرية"
+        case (.karachi, .english): return "Karachi"
+        case (.karachi, .arabic): return "كراتشي"
+        case (.northAmerica, .english): return "North America"
+        case (.northAmerica, .arabic): return "أمريكا الشمالية"
+        }
+    }
+}
+
 struct PrayerSettings: Codable, Hashable {
     var city: String
     var latitude: Double
@@ -270,6 +295,9 @@ struct PrayerSettings: Codable, Hashable {
     var customPhotoFocusX: Double
     var customPhotoFocusY: Double
     var customPhotoRevision: String
+    var calculationMethod: PrayerCalculationMethod
+    var showsPrePrayerAlertBar: Bool
+    var prePrayerAlertBarColorHex: String
 
     enum CodingKeys: String, CodingKey {
         case city
@@ -283,6 +311,9 @@ struct PrayerSettings: Codable, Hashable {
         case customPhotoFocusX
         case customPhotoFocusY
         case customPhotoRevision
+        case calculationMethod
+        case showsPrePrayerAlertBar
+        case prePrayerAlertBarColorHex
     }
 
     init(
@@ -295,7 +326,10 @@ struct PrayerSettings: Codable, Hashable {
         photoChoice: WidgetPhotoChoice = .makkah,
         customPhotoFocusX: Double = 0.5,
         customPhotoFocusY: Double = 0.5,
-        customPhotoRevision: String = ""
+        customPhotoRevision: String = "",
+        calculationMethod: PrayerCalculationMethod = .ummAlQura,
+        showsPrePrayerAlertBar: Bool = true,
+        prePrayerAlertBarColorHex: String = "#D97706"
     ) {
         self.city = city
         self.latitude = latitude
@@ -307,6 +341,9 @@ struct PrayerSettings: Codable, Hashable {
         self.customPhotoFocusX = customPhotoFocusX
         self.customPhotoFocusY = customPhotoFocusY
         self.customPhotoRevision = customPhotoRevision
+        self.calculationMethod = calculationMethod
+        self.showsPrePrayerAlertBar = showsPrePrayerAlertBar
+        self.prePrayerAlertBarColorHex = prePrayerAlertBarColorHex
     }
 
     init(from decoder: Decoder) throws {
@@ -325,6 +362,9 @@ struct PrayerSettings: Codable, Hashable {
         customPhotoFocusX = try container.decodeIfPresent(Double.self, forKey: .customPhotoFocusX) ?? 0.5
         customPhotoFocusY = try container.decodeIfPresent(Double.self, forKey: .customPhotoFocusY) ?? 0.5
         customPhotoRevision = try container.decodeIfPresent(String.self, forKey: .customPhotoRevision) ?? ""
+        calculationMethod = try container.decodeIfPresent(PrayerCalculationMethod.self, forKey: .calculationMethod) ?? .ummAlQura
+        showsPrePrayerAlertBar = try container.decodeIfPresent(Bool.self, forKey: .showsPrePrayerAlertBar) ?? true
+        prePrayerAlertBarColorHex = try container.decodeIfPresent(String.self, forKey: .prePrayerAlertBarColorHex) ?? "#D97706"
     }
 
     func encode(to encoder: Encoder) throws {
@@ -339,6 +379,9 @@ struct PrayerSettings: Codable, Hashable {
         try container.encode(customPhotoFocusX, forKey: .customPhotoFocusX)
         try container.encode(customPhotoFocusY, forKey: .customPhotoFocusY)
         try container.encode(customPhotoRevision, forKey: .customPhotoRevision)
+        try container.encode(calculationMethod, forKey: .calculationMethod)
+        try container.encode(showsPrePrayerAlertBar, forKey: .showsPrePrayerAlertBar)
+        try container.encode(prePrayerAlertBarColorHex, forKey: .prePrayerAlertBarColorHex)
     }
 
     var customPhotoFocusPoint: CGPoint {
@@ -359,7 +402,10 @@ struct PrayerSettings: Codable, Hashable {
         photoChoice: .makkah,
         customPhotoFocusX: 0.5,
         customPhotoFocusY: 0.5,
-        customPhotoRevision: ""
+        customPhotoRevision: "",
+        calculationMethod: .ummAlQura,
+        showsPrePrayerAlertBar: true,
+        prePrayerAlertBarColorHex: "#D97706"
     )
 }
 

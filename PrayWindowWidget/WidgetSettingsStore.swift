@@ -37,6 +37,9 @@ final class WidgetSettingsStore {
         if copy.theme.textHex.uppercased() == "#00000000" {
             copy.theme.textHex = WidgetTheme.default.textHex
         }
+        if copy.prePrayerAlertBarColorHex.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            copy.prePrayerAlertBarColorHex = PrayerSettings.default.prePrayerAlertBarColorHex
+        }
         copy.theme.fontSizeMultiplier = min(max(copy.theme.fontSizeMultiplier, 0.7), 1.6)
         copy.customPhotoFocusX = min(max(copy.customPhotoFocusX, 0), 1)
         copy.customPhotoFocusY = min(max(copy.customPhotoFocusY, 0), 1)
